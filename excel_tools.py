@@ -2,6 +2,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import pandas as pd
+import numpy as np
 
 class ExcelSplitterApp:
     def __init__(self, root):
@@ -207,12 +208,10 @@ class ExcelSplitterApp:
             if hasattr(self, 'selected_columns') and self.selected_columns:
                 selected_cols = [col for col in self.selected_columns if col in df.columns]
                 df = df[selected_cols]
-                
-                # 应用列名映射
                 if hasattr(self, 'column_mappings'):
-                    df = df.rename(columns={k:v for k,v in self.column_mappings.items() 
-                                           if k in df.columns and v})
-                
+                    mapping = {k: v for k, v in self.column_mappings.items() if k in df.columns and v}
+                    df = df.rename(columns=mapping)
+            
             total_rows = len(df)
             chunk_size = total_rows // split_count
             
@@ -220,15 +219,82 @@ class ExcelSplitterApp:
             file_name = os.path.splitext(os.path.basename(input_path))[0]
             file_ext = os.path.splitext(input_path)[1]
             
+            # 创建进度条和日志区域
+            progress_frame = tk.Frame(self.root)
+            progress_frame.grid(row=6, column=0, columnspan=3, padx=10, pady=5)
+            
+            progress_bar = ttk.Progressbar(progress_frame, length=300, mode='determinate')
+            progress_bar.grid(row=0, column=0, columnspan=3, padx=10, pady=5)
+            
+            progress_label = tk.Label(progress_frame, text="0%")
+            progress_label.grid(row=1, column=0, columnspan=3, pady=5)
+            
+            # 创建日志文本框
+            log_frame = tk.Frame(self.root)
+            log_frame.grid(row=7, column=0, columnspan=3, padx=10, pady=5)
+            
+            log_text = tk.Text(log_frame, height=10, width=50)
+            log_text.grid(row=0, column=0)
+            
+            # 添加滚动条
+            scrollbar = tk.Scrollbar(log_frame, command=log_text.yview)
+            scrollbar.grid(row=0, column=1, sticky='nsew')
+            log_text['yscrollcommand'] = scrollbar.set
+            
+            def log_message(message):
+                log_text.insert(tk.END, message + "\n")
+                log_text.see(tk.END)
+                self.root.update()
+            
+            total_processed = 0
+            
             # 拆分并保存文件
             for i in range(split_count):
                 start = i * chunk_size
                 end = (i + 1) * chunk_size if i < split_count - 1 else total_rows
                 chunk = df.iloc[start:end]
                 
-                output_path = os.path.join(output_dir, f"{file_name}_{i+1}{file_ext}")
-                chunk.to_excel(output_path, index=False)
+                output_path = os.path.join(output_dir, f"{file_name}_{i+1}csv")
+                
+                # 使用ExcelWriter逐行写入并更新进度
+                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                    # 写入表头
+                    chunk.iloc[0:0].to_excel(writer, index=False, sheet_name='Sheet1')
+                    
+                    # 逐行写入数据
+                    for idx, row in enumerate(chunk.itertuples(index=False), 1):
+                        row_df = pd.DataFrame([row], columns=chunk.columns)
+                        row_df.to_excel(
+                            writer, 
+                            startrow=idx,
+                            header=False, 
+                            index=False,
+                            sheet_name='Sheet1'
+                        )
+                        
+                        # 检查空值
+                        empty_fields = []
+                        for col in chunk.columns:
+                            value = row_df[col].iloc[0]
+                            # 检查各种类型的空值
+                            if pd.isna(value) or (isinstance(value, str) and value.strip() == '') or value == None:
+                                empty_fields.append(col)
+                        
+                        # 更新进度
+                        total_processed += 1
+                        progress = (total_processed / total_rows) * 100
+                        progress_bar['value'] = progress
+                        progress_label['text'] = f"{progress:.1f}% ({total_processed}/{total_rows}行)"
+                        
+                        # 记录写入情况
+                        log_message(f"第 {total_processed} 行写入完成，进度：{progress:.1f}%")
+                        if empty_fields:
+                            log_message(f"  - 警告：以下字段为空：{', '.join(empty_fields)}")
+                        
+                        self.root.update()
             
+            progress_frame.destroy()
+            log_frame.destroy()
             messagebox.showinfo("成功", f"Excel文件已成功拆分为{split_count}个文件")
         except Exception as e:
             messagebox.showerror("错误", f"处理过程中出现错误:\n{str(e)}")

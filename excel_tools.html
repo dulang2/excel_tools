@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel处理工具</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- SheetJS -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.19.3/package/dist/xlsx.full.min.js"></script>
+    <style>
+        .container {
+            max-width: 800px;
+            margin-top: 30px;
+        }
+        .form-check {
+            margin: 5px 0;
+            width: auto;
+            display: inline-block;
+            margin-right: 15px;
+        }
+        #columnSelection {
+            margin: 15px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .column-mapping {
+            display: inline-block;
+            margin-right: 15px;
+            margin-bottom: 10px;
+        }
+        .column-mapping input[type="text"] {
+            width: 120px;
+            margin-left: 8px;
+            display: block;
+            margin-top: 4px;
+        }
+        .quick-select {
+            margin-bottom: 15px;
+        }
+        .output-path {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .output-path span {
+            flex: 1;
+            padding: 6px 12px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .schemes-container {
+            margin: 15px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .scheme-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 10px;
+        }
+        .scheme-item button {
+            padding: 2px 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2 class="mb-4">Excel处理工具</h2>
+        
+        <!-- 文件上传 -->
+        <div class="mb-3">
+            <label for="excelFile" class="form-label">选择Excel文件</label>
+            <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
+        </div>
+
+        <!-- 输出文件名 -->
+        <div class="mb-3">
+            <label for="outputFileName" class="form-label">输出文件名称</label>
+            <input type="text" class="form-control" id="outputFileName">
+        </div>
+
+        <!-- 功能选择 -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">功能选择</h5>
+                
+                <!-- 功能1：文件拆分 -->
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="splitFileCheck">
+                    <label class="form-check-label" for="splitFileCheck">
+                        拆分Excel文件
+                    </label>
+                </div>
+                <div class="mb-3" id="splitCountDiv" style="display: none;">
+                    <label for="splitCount" class="form-label">拆分数量</label>
+                    <input type="number" class="form-control" id="splitCount" min="2" value="2">
+                </div>
+
+                <!-- 功能2：字段选择 -->
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="selectColumnsCheck">
+                    <label class="form-check-label" for="selectColumnsCheck">
+                        选择保留字段
+                    </label>
+                </div>
+                <div id="columnSelectionContainer" style="display: none;">
+                    <!-- 方案管理 -->
+                    <div class="schemes-container">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0">保存的方案</h6>
+                            <div>
+                                <input type="text" class="form-control form-control-sm d-inline-block" 
+                                       style="width: 150px;" id="schemeName" placeholder="方案名称">
+                                <button class="btn btn-primary btn-sm ms-2" onclick="saveCurrentScheme()">保存当前方案</button>
+                            </div>
+                        </div>
+                        <div id="schemesList">
+                            <!-- 方案列表将通过JavaScript动态添加 -->
+                        </div>
+                    </div>
+
+                    <!-- 快速选择 -->
+                    <div class="quick-select">
+                        <label for="quickSelect" class="form-label">快速选择列（用逗号分隔，如：a,b,c）</label>
+                        <input type="text" class="form-control" id="quickSelect" placeholder="输入列名，用逗号分隔">
+                        <button class="btn btn-secondary btn-sm mt-2" onclick="applyQuickSelect()">应用选择</button>
+                    </div>
+
+                    <!-- 列映射 -->
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="enableMapping">
+                            <label class="form-check-label" for="enableMapping">
+                                启用列映射
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 字段选择框 -->
+                    <div id="columnSelection">
+                        <!-- 字段选择框将通过JavaScript动态添加 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 执行按钮 -->
+        <button class="btn btn-primary" onclick="processExcel()">执行</button>
+    </div>
+
+    <script>
+        let workbook = null;
+        let columns = [];
+        let inputFilePath = '';
+        let outputPath = '';
+        let inputFileName = '';
+
+        // 加载保存的方案
+        function loadSchemes() {
+            const schemes = JSON.parse(localStorage.getItem('columnSchemes') || '{}');
+            const schemesList = document.getElementById('schemesList');
+            schemesList.innerHTML = '';
+
+            Object.entries(schemes).forEach(([name, scheme]) => {
+                const div = document.createElement('div');
+                div.className = 'scheme-item';
+                div.innerHTML = `
+                    <span class="flex-grow-1">${name}</span>
+                    <button class="btn btn-outline-primary btn-sm" onclick='applyScheme(${JSON.stringify(scheme)})'>应用</button>
+                    <button class="btn btn-outline-danger btn-sm" onclick='deleteScheme("${name}")'>删除</button>
+                `;
+                schemesList.appendChild(div);
+            });
+        }
+
+        // 保存当前方案
+        function saveCurrentScheme() {
+            const name = document.getElementById('schemeName').value.trim();
+            if (!name) {
+                alert('请输入方案名称');
+                return;
+            }
+
+            const selectedColumns = columns.map((col, index) => ({
+                name: col,
+                selected: document.getElementById(`col_${index}`).checked,
+                mapping: document.getElementById('enableMapping').checked ? 
+                    document.getElementById(`map_${index}`)?.value || col : col
+            }));
+
+            const schemes = JSON.parse(localStorage.getItem('columnSchemes') || '{}');
+            schemes[name] = selectedColumns;
+            localStorage.setItem('columnSchemes', JSON.stringify(schemes));
+
+            loadSchemes();
+            document.getElementById('schemeName').value = '';
+        }
+
+        // 应用方案
+        function applyScheme(scheme) {
+            document.getElementById('selectColumnsCheck').checked = true;
+            document.getElementById('columnSelectionContainer').style.display = 'block';
+
+            // 检查是否需要启用映射
+            const hasMapping = scheme.some(col => col.mapping !== col.name);
+            document.getElementById('enableMapping').checked = hasMapping;
+            
+            // 更新列选择状态
+            updateColumnSelection();
+            
+            // 应用方案设置
+            scheme.forEach((schemeCol) => {
+                const index = columns.findIndex(col => col === schemeCol.name);
+                if (index !== -1) {
+                    const checkbox = document.getElementById(`col_${index}`);
+                    if (checkbox) checkbox.checked = schemeCol.selected;
+
+                    if (hasMapping) {
+                        const mappingInput = document.getElementById(`map_${index}`);
+                        if (mappingInput) mappingInput.value = schemeCol.mapping;
+                    }
+                }
+            });
+
+            // 更新快速选择表达式
+            const selectedColumns = scheme
+                .filter(col => col.selected)
+                .map(col => col.name)
+                .join(',');
+            document.getElementById('quickSelect').value = selectedColumns;
+        }
+
+        // 删除方案
+        function deleteScheme(name) {
+            if (!confirm(`确定要删除方案"${name}"吗？`)) return;
+            
+            const schemes = JSON.parse(localStorage.getItem('columnSchemes') || '{}');
+            delete schemes[name];
+            localStorage.setItem('columnSchemes', JSON.stringify(schemes));
+            
+            loadSchemes();
+        }
+
+        // 监听文件上传
+        document.getElementById('excelFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // 设置默认输出文件名（去除扩展名）
+            inputFileName = file.name.replace(/\.[^/.]+$/, "");
+            document.getElementById('outputFileName').value = inputFileName;
+
+            // 保存输入文件路径
+            inputFilePath = file.path || '';
+            outputPath = inputFilePath ? inputFilePath.substring(0, inputFilePath.lastIndexOf('\\')) : '.';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                workbook = XLSX.read(data, { type: 'array' });
+                
+                // 获取第一个工作表的表头
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const range = XLSX.utils.decode_range(firstSheet['!ref']);
+                columns = [];
+                
+                for (let C = range.s.c; C <= range.e.c; C++) {
+                    const cell = firstSheet[XLSX.utils.encode_cell({ r: 0, c: C })];
+                    if (cell && cell.v) {
+                        columns.push(cell.v);
+                    }
+                }
+
+                // 更新字段选择框
+                updateColumnSelection();
+                // 加载保存的方案
+                loadSchemes();
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // 监听功能选择
+        document.getElementById('splitFileCheck').addEventListener('change', function(e) {
+            document.getElementById('splitCountDiv').style.display = e.target.checked ? 'block' : 'none';
+        });
+
+        document.getElementById('selectColumnsCheck').addEventListener('change', function(e) {
+            document.getElementById('columnSelectionContainer').style.display = e.target.checked ? 'block' : 'none';
+        });
+
+        document.getElementById('enableMapping').addEventListener('change', function(e) {
+            updateColumnSelection();
+        });
+
+        // 快速选择列
+        function applyQuickSelect() {
+            const quickSelectInput = document.getElementById('quickSelect').value;
+            const selectedColumns = quickSelectInput.split(',').map(col => col.trim());
+            
+            // 更新选择框状态
+            columns.forEach((column, index) => {
+                const checkbox = document.getElementById(`col_${index}`);
+                if (checkbox) {
+                    checkbox.checked = selectedColumns.includes(column);
+                }
+            });
+        }
+
+        // 更新字段选择框
+        function updateColumnSelection() {
+            const container = document.getElementById('columnSelection');
+            const enableMapping = document.getElementById('enableMapping').checked;
+            const selectColumnsEnabled = document.getElementById('selectColumnsCheck').checked;
+            container.innerHTML = '';
+            
+            columns.forEach((column, index) => {
+                const div = document.createElement('div');
+                div.className = 'column-mapping';
+                
+                // 创建复选框和标签
+                const checkboxHtml = `
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="col_${index}" 
+                               ${!selectColumnsEnabled || document.getElementById(`col_${index}`)?.checked ? 'checked' : ''}>
+                        <label class="form-check-label" for="col_${index}">
+                            ${column}
+                        </label>
+                    </div>
+                `;
+                
+                // 如果启用映射，添加映射输入框
+                const mappingHtml = enableMapping ? `
+                    <input type="text" class="form-control form-control-sm" 
+                           id="map_${index}" 
+                           placeholder="新列名"
+                           value="${column}">
+                ` : '';
+                
+                div.innerHTML = checkboxHtml + mappingHtml;
+                container.appendChild(div);
+            });
+        }
+
+        // 处理Excel文件
+        function processExcel() {
+            if (!workbook) {
+                alert('请先上传Excel文件！');
+                return;
+            }
+
+            const splitFile = document.getElementById('splitFileCheck').checked;
+            const selectColumns = document.getElementById('selectColumnsCheck').checked;
+            const splitCount = parseInt(document.getElementById('splitCount').value);
+            const enableMapping = document.getElementById('enableMapping').checked;
+            const outputFileName = document.getElementById('outputFileName').value.trim() || inputFileName;
+
+            // 获取第一个工作表的数据
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            let data = XLSX.utils.sheet_to_json(firstSheet);
+
+            // 处理字段选择和映射
+            if (selectColumns) {
+                const selectedColumns = columns.filter((_, index) => 
+                    document.getElementById(`col_${index}`).checked
+                );
+                
+                const columnMappings = {};
+                if (enableMapping) {
+                    columns.forEach((col, index) => {
+                        if (document.getElementById(`col_${index}`).checked) {
+                            const mappingInput = document.getElementById(`map_${index}`);
+                            if (mappingInput && mappingInput.value.trim()) {
+                                columnMappings[col] = mappingInput.value.trim();
+                            }
+                        }
+                    });
+                }
+
+                data = data.map(row => {
+                    const newRow = {};
+                    selectedColumns.forEach(col => {
+                        if (row[col] !== undefined) {
+                            const newColName = columnMappings[col] || col;
+                            newRow[newColName] = row[col];
+                        }
+                    });
+                    return newRow;
+                });
+            }
+
+            // 处理文件拆分
+            if (splitFile) {
+                const totalRows = data.length;
+                const chunkSize = Math.ceil(totalRows / splitCount);
+                
+                for (let i = 0; i < splitCount; i++) {
+                    const startIdx = i * chunkSize;
+                    const endIdx = Math.min(startIdx + chunkSize, totalRows);
+                    const chunk = data.slice(startIdx, endIdx);
+                    
+                    const newWb = XLSX.utils.book_new();
+                    const newWs = XLSX.utils.json_to_sheet(chunk);
+                    XLSX.utils.book_append_sheet(newWb, newWs, 'Sheet1');
+                    
+                    // 生成文件名
+                    const fileName = `${outputPath}/${outputFileName}_${i + 1}.xlsx`;
+                    XLSX.writeFile(newWb, fileName);
+                }
+                alert(`已将文件拆分为${splitCount}个部分并保存！`);
+            } else {
+                // 如果只选择了字段但没有拆分
+                const newWb = XLSX.utils.book_new();
+                const newWs = XLSX.utils.json_to_sheet(data);
+                XLSX.utils.book_append_sheet(newWb, newWs, 'Sheet1');
+                XLSX.writeFile(newWb, `${outputPath}/${outputFileName}.xlsx`);
+                alert(`文件处理完成！`);
+            }
+        }
+
+        // 初始化加载保存的方案
+        loadSchemes();
+    </script>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 
